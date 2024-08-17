@@ -42,32 +42,70 @@ nodes:
     skipNodeEmails: true
 
 onInstall:
-  - addNodes:
-    - admin-panel:
-      displayName: Admin Panel
-      cloudlets: 8
-      nodeGroup: cp
-      nodeType: docker
-      dockerName: directus/directus
-      skipNodeEmails: true
-      dockerTag: latest
-      dockerRunCmd: node cli.js bootstrap && pm2-runtime start ecosystem.config.cjs ;
-      dockerEntryPoint: /bin/sh -c
-      extip: true
-      dockerEnvVars:
-        SECRET: ${fn.uuid}
-        ADMIN_EMAIL: ${settings.ADMIN_EMAIL}
-        ADMIN_PASSWORD: ${settings.ADMIN_PASSWORD}
-        DB_USER: webadmin
-        DB_PASSWORD: ${nodes.postgresql.password}
-        DB_CLIENT: pg
-        DB_HOST: ${nodes.postgresql.address}
-        DB_PORT: 5432
-        DB_DATABASE: postgres
-        CACHE_ENABLED: true
-        CACHE_AUTO_PURGE: true
-        CACHE_STORE: redis
-        REDIS_HOST: ${nodes.cache.address}
-        REDIS_PORT: 6379
-        REDIS_PASSWORD: ${nodes.cache.password}
-        PUBLIC_URL: ${env.url}
+  - install:
+    type: update
+    name: Directus
+    onInstall:
+      - addNodes:
+        - admin-panel:
+          displayName: Admin Panel
+          cloudlets: 8
+          nodeGroup: cp
+          nodeType: docker
+          dockerName: directus/directus
+          skipNodeEmails: true
+          dockerTag: latest
+          dockerRunCmd: node cli.js bootstrap && pm2-runtime start ecosystem.config.cjs ;
+          dockerEntryPoint: /bin/sh -c
+          extip: true
+          dockerEnvVars:
+            SECRET: ${fn.uuid}
+            ADMIN_EMAIL: ${settings.ADMIN_EMAIL}
+            ADMIN_PASSWORD: ${settings.ADMIN_PASSWORD}
+            DB_USER: webadmin
+            DB_PASSWORD: ${nodes.postgresql.password}
+            DB_CLIENT: pg
+            DB_HOST: ${nodes.postgresql.address}
+            DB_PORT: 5432
+            DB_DATABASE: postgres
+            CACHE_ENABLED: true
+            CACHE_AUTO_PURGE: true
+            CACHE_STORE: redis
+            REDIS_HOST: ${nodes.cache.address}
+            REDIS_PORT: 6379
+            REDIS_PASSWORD: ${nodes.cache.password}
+            PUBLIC_URL: ${env.url}
+  - install:
+    type: update
+    name: Update Nginx Configuration
+    onInstall:
+      - writeFile:
+        nodeType: nginx
+        path: ${nginx.SERVER_CONF_D}/directus.conf
+        body: |
+          http {
+            server {
+                listen 80;
+                listen [::]:80;
+                server_name _;
+                location / {
+                    proxy_pass http://${nodes.cp.address}:8055;
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                }
+            }
+          }
+      - replaceInFile:
+        nodeType: nginx
+        path: ${nginxphp.NGINX_CONF}
+        replacements: 
+          - pattern: nginx-jelastic 
+            replacement: conf.d/directus
+  - install:
+    type: update
+    name: Restart Nginx
+    onInstall:
+      - restartService:
+        nodeGroup: bl
