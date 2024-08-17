@@ -1,7 +1,7 @@
 version: 1.5
 type: install
 name: Directus
-logo: https://directus.io/_nuxt/logo-dark.Bhm22UGW.svg
+logo: https://icons.duckduckgo.com/ip3/directus.io.ico
 homepage: https://directus.io/
 description: This template will create an instance of the latest version of Directus, a headless CMS and API for custom databases.
 ssl: true
