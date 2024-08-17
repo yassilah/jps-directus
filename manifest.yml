@@ -58,7 +58,6 @@ onInstall:
         SECRET: ${fn.uuid}
         ADMIN_EMAIL: ${settings.ADMIN_EMAIL}
         ADMIN_PASSWORD: ${settings.ADMIN_PASSWORD}
-        PORT: 80
         DB_USER: webadmin
         DB_PASSWORD: ${nodes.postgresql.password}
         DB_CLIENT: pg
