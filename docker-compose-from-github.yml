@@ -118,7 +118,7 @@ actions:
           '      - EMAIL=' + email,
           '      - EXTRA_DOMAINS=' + map.slice(1).map(item => item.domain).join(','),
           '    volumes:',
-          '      - ' + confDir + ':/config',
+          '      - ' + confDir + ':/config/nginx/site-confs',
           '    ports:',
           '      - 443:443',
           '      - 80:80',
@@ -157,7 +157,7 @@ actions:
               '}'
             ].join('\n');
 
-            return { path: confDir + '/nginx/site-confs/' + item.domain + '.conf', content: content };
+            return { path: confDir + '/' + item.domain + '.conf', content: content };
           });
 
           nginxFiles.push({ path: nginxComposePath, content: compose.join('\n') });
