@@ -1,0 +1,63 @@
+type: install
+name: Docker Compose from GitHub
+description: Install Docker Compose from GitHub repository.
+
+settings: 
+  fields:  
+  - caption: GitHub Repository
+    type: string
+    name: repo
+    placeholder: username/repo
+    required: true
+    regex: ^[a-zA-Z0-9-]+/[a-zA-Z0-9-]+$
+  - caption: Access Token
+    type: string
+    name: token
+    inputType: password
+  - caption: Path to Docker Compose file
+    type: string
+    name: compose
+    default: docker-compose.prod.yml
+    required: true
+  - caption: Environment Variables
+    type: text
+    name: env
+    required: false
+  - caption: Auto Deploy
+    type: boolean
+    name: autoDeploy
+    default: false
+    required: false
+  
+nodes:
+- count: 1
+  cloudlets: 32
+  nodeType: dockerengine
+  nodeGroup: cp
+  displayName: Docker
+  extip: true
+
+skipNodeEmails: true
+    
+onInstall:
+  - if ("${settings.token}"): cloneRepoWithToken
+  - if (!"${settings.token}"): cloneRepo
+  - setEnvironmentVariables
+  - startCompose
+
+actions: 
+  cloneRepo:
+    cmd[${nodes.cp.master.id}]: |-
+      git clone https://github.com/${settings.repo}.git app
+  cloneRepoWithToken:
+    cmd[${nodes.cp.master.id}]: |-
+      git clone https://${settings.token}@github.com/${settings.repo}.git app
+  setEnvironmentVariables:
+    cmd[${nodes.cp.master.id}]: |-
+      if [ -n "${settings.env}" ]; then
+        echo "${settings.env}" > app/.env
+      fi
+  startCompose:
+    cmd[${nodes.cp.master.id}]: |-
+      docker-compose -f app/${settings.compose} up -d
+
