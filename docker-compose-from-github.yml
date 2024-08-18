@@ -1,6 +1,6 @@
 type: install
 name: Docker Compose from GitHub
-description: Install Docker Compose from GitHub repository.
+tooltip: Install Docker Compose from GitHub repository.
 
 settings: 
   fields:  
@@ -10,24 +10,69 @@ settings:
     placeholder: username/repo
     required: true
     regex: ^[a-zA-Z0-9-]+/[a-zA-Z0-9-]+$
+  - caption: GitHub Branch
+    type: string
+    name: branch
+    default: main
   - caption: Access Token
     type: string
     name: token
     inputType: password
-  - caption: Path to Docker Compose file
+  - type: spacer
+  - caption: Docker Compose
     type: string
     name: compose
-    default: docker-compose.prod.yml
+    default: docker-compose.yml
     required: true
   - caption: Environment Variables
     type: text
     name: env
     required: false
+  - type: spacer
   - caption: Auto Deploy
-    type: boolean
+    type: toggle
     name: autoDeploy
     default: false
     required: false
+    showIf:
+      true:
+      - caption: Auto Deploy Token
+        type: string
+        name: autoDeployToken
+        inputType: password
+        required: true
+  - caption: NGINX
+    type: toggle
+    name: nginx
+    default: true
+    required: false
+    tooltip: "Automatically generate NGINX configuration."
+    showIf: 
+      true:
+      - caption: NGINX Mapping
+        type: text
+        name: nginxMap
+        tooltip: "Port <-> Domain mapping: 'service:port:domain'."
+      - type: displayfield
+        name: dns
+        markup: "Please add the correct CNAME configuration to point your domain to the current environment URL before clicking on Install."
+      - caption: Let's Encrypt
+        type: toggle
+        name: letsEncrypt
+        tooltip: "Automatically generate SSL certificates."
+        default: true
+        showIf:
+          true:
+          - caption: Timezone
+            type: string
+            name: letsEncryptTimezone
+            default: Europe/Paris
+            required: false
+          - caption: Email
+            type: string
+            name: letsEncryptEmail
+            tooltip: "Email for Let's Encrypt notifications."
+            required: false
   
 nodes:
 - count: 1
@@ -40,24 +85,130 @@ nodes:
 skipNodeEmails: true
     
 onInstall:
-  - if ("${settings.token}"): cloneRepoWithToken
-  - if (!"${settings.token}"): cloneRepo
-  - setEnvironmentVariables
-  - startCompose
+  - if (${settings.nginx}): configureNginx
+  - cloneRepo
+  - setEnv
+  - composeUp
 
 actions: 
+  configureNginx:
+    script:
+      script: |
+        const map = nginxMap.split('\n').map(row => {
+          const parts = row.split(':');
+          return { domain: parts[2].trim(), service: parts[0].trim(), port: parts[1].trim() };
+        });
+
+        const confDir = '/root/conf.d';
+        const nginxComposePath = '/root/docker-compose.nginx.yml';
+
+        const compose = letsEncrypt && map.length > 0 ? [
+          'version: \'3.7\'',
+          'services:',
+          '  swag:',
+          '    image: linuxserver/swag:latest',
+          '    container_name: swag',
+          '    cap_add:',
+          '      - NET_ADMIN',
+          '    environment:',
+          '      - PUID=1000',
+          '      - PGID=1000',
+          '      - TZ=' + timezone,
+          '      - URL=' + map[0].domain,
+          '      - EMAIL=' + email,
+          '      - EXTRA_DOMAINS=' + map.slice(1).map(item => item.domain).join(','),
+          '    volumes:',
+          '      - ' + confDir + ':/config',
+          '    ports:',
+          '      - 443:443',
+          '      - 80:80',
+          '    restart: unless-stopped'
+        ] : [
+          'version: \'3.7\'',
+          'services:',
+          '  nginx:',
+          '    image: nginx:latest',
+          '    ports:',
+          '      - 80:80',
+          '    volumes:',
+          '      - ' + confDir + ':/etc/nginx/conf.d:ro'
+        ];
+
+
+        if (map.length > 0) {
+          compose.push('    depends_on:');
+          
+          const nginxFiles = map.map(item => {
+            compose.push('     - ' + item.service);
+            
+            jelastic.env.binder.BindExtDomain('${env.envName}', session, item.domain);
+
+            const content = [
+              'server {',
+              '  listen 80;',
+              '  server_name ' + item.domain + ';',
+              '  location / {',
+              '    proxy_pass http://' + item.service + ':' + item.port + ';',
+              '    proxy_set_header Host $host;',
+              '    proxy_set_header X-Real-IP $remote_addr;',
+              '    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;',
+              '    proxy_set_header X-Forwarded-Proto $scheme;',
+              '  }',
+              '}'
+            ].join('\n');
+
+            return { path: confDir + '/nginx/site-confs/' + item.domain + '.conf', content: content };
+          });
+
+          nginxFiles.push({ path: nginxComposePath, content: compose.join('\n') });
+        }
+
+        return  { 
+          result: 0, 
+          onAfterReturn: {
+            call: [{ action: 'createDirectory', params: { path: confDir } }].concat(nginxFiles.map(params => ({ action: 'writeFile', params: params }))),
+            setGlobals: {
+              nginxComposePath: nginxComposePath,
+              start_page: letsEncrypt && map.length > 0 ? 'https://' + map[0].domain : 'http://${env.domain}'
+            } 
+          }
+        };
+      params:
+        nginxMap: ${settings.nginxMap}
+        letsEncrypt: ${settings.letsEncrypt}
+        email: ${settings.letsEncryptEmail}
+        timezone: ${settings.letsEncryptTimezone}
+
+  createDirectory:
+    createDirectory[cp]:
+      path: ${this.path}
+
+  writeFile:
+    writeFile[cp]:
+      path: ${this.path}
+      body: ${this.content}
+
   cloneRepo:
     cmd[${nodes.cp.master.id}]: |-
-      git clone https://github.com/${settings.repo}.git app
-  cloneRepoWithToken:
-    cmd[${nodes.cp.master.id}]: |-
-      git clone https://${settings.token}@github.com/${settings.repo}.git app
-  setEnvironmentVariables:
+      if [ -n "${settings.token}" ]; then
+        git clone -b ${settings.branch} https://${settings.token}@github.com/${settings.repo}.git app
+      else
+        git clone -b ${settings.branch} https://github.com/${settings.repo}.git app
+      fi
+
+  setEnv:
     cmd[${nodes.cp.master.id}]: |-
       if [ -n "${settings.env}" ]; then
         echo "${settings.env}" > app/.env
       fi
-  startCompose:
-    cmd[${nodes.cp.master.id}]: |-
-      docker-compose -f app/${settings.compose} up -d
 
+  composeUp:
+    if (${settings.nginx}): 
+      cmd[${nodes.cp.master.id}]: |-
+         docker-compose -f ./app/${settings.compose} -f ${globals.nginxComposePath} up -d
+
+    else:
+      cmd[${nodes.cp.master.id}]: |-
+        docker-compose -f ./app/${settings.compose} up -d
+
+startPage: ${globals.start_page}
