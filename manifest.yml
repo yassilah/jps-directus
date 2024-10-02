@@ -82,37 +82,134 @@ onInstall:
 
 actions: 
   cloneRepo:
-    script: /scripts/clone-repo.sh
-    params:
-      repo: ${settings.repo}
-      branch: ${settings.branch}
-      token: ${settings.token}
+    cmd: |
+      if [ -n "${settings.token}" ]; then
+          git clone -b ${settings.branch} https://${settings.token}@github.com/${settings.repo}.git /home/jelastic/app
+      else
+          git clone -b ${settings.branch} https://github.com/${settings.repo}.git /home/jelastic/app
+      fi
 
   createEnvFile:
-    script: /scripts/create-env-file.sh
-    params:
-      env: ${settings.env}
+    cmd: |
+      if [ -n "${settings.env}" ]; then
+          echo "${settings.env}" > /home/jelastic/app/.env
+      fi
 
   installDocker:
-    script: /scripts/install-docker.sh
-    params:
-      compose: ${settings.compose}
+    cmd: | 
+      # Add Docker's official GPG key:
+      sudo apt-get update
+      sudo apt-get install ca-certificates curl
+      sudo install -m 0755 -d /etc/apt/keyrings
+      sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+      sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+      # Add the repository to Apt sources:
+      echo \
+        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+        $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+        sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+      sudo apt-get update
+
+      # Install Docker
+      sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+      # Run docker compose 
+      sudo docker compose -f /home/jelastic/app/${settings.compose} up -d
   
   installWebhook:
-    script: /scripts/install-webhook.sh
-    params:
-      domain: ${env.domain}
-      token: ${settings.token}
-      repo: ${settings.repo}
-      branch: ${settings.branch}
-      deploy: ${settings.deploy}
+    cmd: |
+      # Create a webhook on GitHub
+      curl -X POST -H "Authorization: Bearer ${settings.token}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/${settings.repo}/hooks -d '{"name": "web", "active": true, "events": ["push"], "config": {"url": "http://${env.domain}:9000/hooks/github", "content_type": "json"}}'
+
+      # Install webhook
+      sudo apt-get install webhook
+
+      # Create a hooks.json file
+      cat > /home/jelastic/hooks.json <<EOF
+      [
+        {
+          "id": "github",
+          "execute-command": "/home/jelastic/app/${settings.deploy}",
+          "command-working-directory": "/home/jelastic/app",
+          "response-message": "Redeploying...",
+          "trigger-rule": {
+            "match": { "value": "refs/heads/${branch}", "type": "payload", "parameter": { "name": "ref" } }
+          }
+        }
+      ]
+      EOF
+
+      # Ensure deploy script is executable
+      chmod +x /home/jelastic/app/${settings.deploy}
+
+      # Create webhook service
+      cat > /etc/systemd/system/webhook.service <<EOF
+      [Unit]
+      Description=webhook
+
+      [Service]
+      ExecStart=webhook -hooks /home/hooks.json -verbose
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+      EOF
+
+      # Start webhook service
+      sudo systemctl start webhook
+
+      # Enable webhook service
+      sudo systemctl enable webhook
 
   installNginx:
-    script: /scripts/install-nginx.sh
-    params:
-      domains: ${settings.domains}
+    cmd: |
+      # Install nginx
+      sudo apt-get install nginx
+
+      # Create a server block for each domain
+      LIST="${settings.domains}"
+
+      IFS=$'\n' read -r -d '' -a DOMAINS <<< "$(echo -e "$LIST")"
+
+      for DOMAIN in "${DOMAINS[@]}"; do
+          IFS=':' read -r -a DOMAIN <<< "$DOMAIN"
+
+          cat > /etc/nginx/sites-available/${DOMAIN[0]}.conf <<EOF
+      server {
+          listen 80;
+          server_name ${DOMAIN[0]};
+
+          location / {
+              proxy_pass http://\$host:${DOMAIN[1]};
+              proxy_http_version 1.1;
+              proxy_set_header Upgrade \$http_upgrade;
+              proxy_set_header Connection 'upgrade';
+              proxy_set_header Host \$host;
+              proxy_cache_bypass \$http_upgrade;
+          }
+      }
+      EOF
+
+          ln -s /etc/nginx/sites-available/${DOMAIN[0]}.conf /etc/nginx/sites-enabled/${DOMAIN[0]}.conf
+      done
+
+      # Restart nginx
+      sudo systemctl restart nginx
+
+      # Enable nginx
+      sudo systemctl enable nginx
 
   installLetsEncrypt:
-    script: /scripts/install-letsencrypt.sh
-    params:
-      email: ${settings.letsEncryptEmail}
+    cmd: |
+      # Install Let's Encrypt
+      sudo apt install certbot python3-certbot-apache
+
+      # Get the list of domains from nginx in /etc/nginx/sites-enabled/ 
+      LIST=$(ls -p /etc/nginx/sites-enabled/  | grep -v / | tr '\n' ',')
+
+      # Install SSL certificates for each domain
+      sudo certbot --nginx -d ${LIST} -n --agree-tos -m ${settings.letsEncryptEmail} --redirect
+
+      # Restart nginx
+      sudo systemctl restart nginx
