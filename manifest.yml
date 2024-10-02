@@ -86,8 +86,8 @@ skipNodeEmails: true
 onInstall:
   - cloneRepo
   - createEnvFile
-  - installDocker
   - installWebhook
+  - installDocker
   - if (${settings.dns}): addDNSRecords
   - if (${settings.nginx}): installNginx
   - if (${settings.letsEncrypt}): installLetsEncrypt
@@ -133,32 +133,41 @@ actions:
       # Start Docker
       sudo systemctl start docker
 
+      # If deploy script then run it
+      if [ -f /home/jelastic/app/${settings.deploy} ]; then
+          sudo chmod +x /home/jelastic/app/${settings.deploy}
+          /home/jelastic/app/${settings.deploy}
+      fi
+
       # Run docker compose 
       sudo docker compose -f /home/jelastic/app/${settings.compose} up -d
 
   addDNSRecords:
     cmd[${nodes.cp.master.id}]: |-
       LIST="${settings.domains}"
-      IFS=$'\n' read -r -d '' -a DOMAINS <<< "$(echo -e "$LIST")"
+      
+      IFS=$'\n' read -r -d '' -a DOMAINS <<< "$(echo "$LIST")"
+
       for DOMAIN in "${DOMAINS[@]}"; do
           IFS=':' read -r -a DOMAIN <<< "$DOMAIN"
-          source=$(echo ${DOMAIN[0]} | cut -d'.' -f2-)
+          MAIN=$(echo "$DOMAIN" | rev | cut -d '.' -f 1-2 | rev)
+          SUB=$(echo "$DOMAIN" | sed "s/\.$MAIN//")
           curl -X POST \
-            -H "Authorization: Bearer ${settings.dnsToken}" \
-            -H "Content-Type: application/json" \
-            -d '{
-                "target": "${nodes.cp.master.address}",
-                "ttl": "3600",
-                "type": "A",
-                "source": "'${source}'"
-            }' \
-            https://api.infomaniak.com/2/zones/1582834/records
+          -H "Authorization: Bearer ${settings.dnsToken}" \
+          -H "Content-Type: application/json" \
+          -d '{
+              "target": "'${nodes.cp.master.extips[0]}'",
+              "ttl": "3600",
+              "type": "A",
+              "source": "'$SUB'"
+          }' \
+          https://api.infomaniak.com/2/zones/$MAIN/records
       done
   
   installWebhook:
    cmd[${nodes.cp.master.id}]: |-
       # Create a webhook on GitHub
-      curl -X POST -H "Authorization: Bearer ${settings.token}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/${settings.repo}/hooks -d '{"name": "web", "active": true, "events": ["push"], "config": {"url": "http://${nodes.cp.master.address}:9000/hooks/github", "content_type": "json"}}'
+      curl -X POST -H "Authorization: Bearer ${settings.token}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/${settings.repo}/hooks -d '{"name": "web", "active": true, "events": ["push"], "config": {"url": "http://${nodes.cp.master.extips[0]}:9000/hooks/github", "content_type": "json"}}'
 
       # Install webhook
       sudo apt-get install --assume-yes webhook
@@ -172,7 +181,7 @@ actions:
           "command-working-directory": "/home/jelastic/app",
           "response-message": "Redeploying...",
           "trigger-rule": {
-            "match": { "value": "refs/heads/${branch}", "type": "payload", "parameter": { "name": "ref" } }
+            "match": { "value": "refs/heads/${settings.branch}", "type": "payload", "parameter": { "name": "ref" } }
           }
         }
       ]
@@ -187,7 +196,7 @@ actions:
       Description=webhook
 
       [Service]
-      ExecStart=webhook -hooks /home/hooks.json -verbose
+      ExecStart=webhook -hooks /home/jelastic/hooks.json -verbose
       Restart=always
 
       [Install]
