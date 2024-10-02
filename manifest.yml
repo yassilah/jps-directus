@@ -1,0 +1,118 @@
+type: install
+name: Docker Compose from GitHub
+tooltip: Install Docker Compose from GitHub repository.
+
+settings: 
+  fields:  
+  - caption: GitHub Repository
+    type: string
+    name: repo
+    placeholder: username/repo
+    required: true
+    regex: ^[a-zA-Z0-9-]+/[a-zA-Z0-9-]+$
+  - caption: GitHub Branch
+    type: string
+    name: branch
+    default: main
+  - caption: Access Token
+    type: string
+    name: token
+    inputType: password
+  - type: spacer
+  - caption: Docker Compose
+    type: string
+    name: compose
+    default: docker-compose.yml
+    required: true
+  - caption: Deploy script
+    type: string
+    name: deploy
+    default: deploy.sh
+    required: true
+  - caption: Environment Variables
+    type: text
+    name: env
+    required: false
+  - type: spacer
+  - caption: NGINX
+    type: toggle
+    name: nginx
+    default: true
+    required: false
+    tooltip: "Automatically generate NGINX configuration."
+    showIf: 
+      true:
+      - caption: NGINX Mapping
+        type: text
+        name: domains
+        tooltip: "Port <-> Domain mapping: 'domain:port'."
+      - type: displayfield
+        name: dns
+        markup: "Please add the correct CNAME configuration to point your domain to the current environment URL before clicking on Install."
+      - caption: Let's Encrypt
+        type: toggle
+        name: letsEncrypt
+        tooltip: "Automatically generate SSL certificates."
+        default: true
+        showIf:
+          true:
+          - caption: Email
+            type: string
+            name: letsEncryptEmail
+            tooltip: "Email for Let's Encrypt notifications."
+            default: contact@apenhet.com
+            required: false
+  
+nodes:
+- count: 1
+  cloudlets: 32
+  nodeType: ubuntu22
+  nodeGroup: cp
+  displayName: Application
+
+skipNodeEmails: true
+    
+onInstall:
+  - cloneRepo
+  - createEnvFile
+  - installDocker
+  - installWebhook
+  - if (${settings.nginx}): installNginx
+  - if (${settings.letsEncrypt}): installLetsEncrypt
+
+actions: 
+  cloneRepo:
+    script: /scripts/clone-repo.sh
+    params:
+      repo: ${settings.repo}
+      branch: ${settings.branch}
+      token: ${settings.token}
+
+  createEnvFile:
+    script: /scripts/create-env-file.sh
+    params:
+      env: ${settings.env}
+
+  installDocker:
+    script: /scripts/install-docker.sh
+    params:
+      compose: ${settings.compose}
+  
+  installWebhook:
+    script: /scripts/install-webhook.sh
+    params:
+      domain: ${env.domain}
+      token: ${settings.token}
+      repo: ${settings.repo}
+      branch: ${settings.branch}
+      deploy: ${settings.deploy}
+
+  installNginx:
+    script: /scripts/install-nginx.sh
+    params:
+      domains: ${settings.domains}
+
+  installLetsEncrypt:
+    script: /scripts/install-letsencrypt.sh
+    params:
+      email: ${settings.letsEncryptEmail}
