@@ -96,7 +96,7 @@ actions:
   cloneRepo:
    cmd[${nodes.cp.master.id}]: |-
       # Install GitHub
-      sudo apt-get install git
+      sudo apt-get --assume-yes install git
 
       # Clone the repository
       if [ -n "${settings.token}" ]; then
