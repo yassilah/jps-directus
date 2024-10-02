@@ -84,11 +84,11 @@ nodes:
 skipNodeEmails: true
     
 onInstall:
+  - if (${settings.dns}): addDNSRecords
   - cloneRepo
   - createEnvFile
   - installWebhook
   - installDocker
-  - if (${settings.dns}): addDNSRecords
   - if (${settings.nginx}): installNginx
   - if (${settings.letsEncrypt}): installLetsEncrypt
 
@@ -136,7 +136,7 @@ actions:
       # If deploy script then run it
       if [ -f /home/jelastic/app/${settings.deploy} ]; then
           sudo chmod +x /home/jelastic/app/${settings.deploy}
-          /home/jelastic/app/${settings.deploy}
+          bash /home/jelastic/app/${settings.deploy}
       fi
 
       # Run docker compose 
@@ -181,7 +181,13 @@ actions:
           "command-working-directory": "/home/jelastic/app",
           "response-message": "Redeploying...",
           "trigger-rule": {
-            "match": { "value": "refs/heads/${settings.branch}", "type": "payload", "parameter": { "name": "ref" } }
+            "match": { 
+            "value": "refs/heads/${settings.branch}", 
+            "type": "value", 
+            "parameter": {
+              "source": "payload",
+              "name": "ref"
+            }
           }
         }
       ]
@@ -202,6 +208,9 @@ actions:
       [Install]
       WantedBy=multi-user.target
       EOF
+
+      # Reload systemd
+      sudo systemctl daemon-reload
 
       # Start webhook service
       sudo systemctl start webhook
@@ -228,7 +237,7 @@ actions:
           server_name ${DOMAIN[0]};
 
           location / {
-              proxy_pass http://\$host:${DOMAIN[1]};
+              proxy_pass http://localhost:${DOMAIN[1]};
               proxy_http_version 1.1;
               proxy_set_header Upgrade \$http_upgrade;
               proxy_set_header Connection 'upgrade';
@@ -250,13 +259,13 @@ actions:
   installLetsEncrypt:
    cmd[${nodes.cp.master.id}]: |-
       # Install Let's Encrypt
-      sudo apt --assume-yes install certbot python3-certbot-apache
+      sudo apt --assume-yes install certbot python3-certbot-nginx
 
       # Get the list of domains from nginx in /etc/nginx/sites-enabled/ 
-      LIST=$(ls -p /etc/nginx/sites-enabled/  | grep -v / | tr '\n' ',')
+      LIST=$(ls -p /etc/nginx/sites-enabled/*.conf | xargs -n 1 basename | tr '\n' ',' | sed 's/\.conf//g' | sed 's/,$//g') \
 
       # Install SSL certificates for each domain
-      sudo certbot --nginx -d ${LIST} -n --agree-tos -m ${settings.letsEncryptEmail} --redirect
+      sudo certbot --nginx -d $LIST -n --agree-tos -m ${settings.letsEncryptEmail} --redirect
 
       # Restart nginx
       sudo systemctl restart nginx
