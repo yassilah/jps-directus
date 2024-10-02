@@ -81,7 +81,7 @@ nodes:
   displayName: Application
   extip: true
   env:
-    JELASTIC_PORTS: 80,443
+    JELASTIC_PORTS: 80,443,9000
 
 skipNodeEmails: true
     
