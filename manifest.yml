@@ -22,7 +22,7 @@ settings:
   - caption: Docker Compose
     type: string
     name: compose
-    default: docker-compose.yml
+    default: docker-compose.yaml
     required: true
   - caption: Deploy script
     type: string
@@ -46,9 +46,19 @@ settings:
         type: text
         name: domains
         tooltip: "Port <-> Domain mapping: 'domain:port'."
-      - type: displayfield
+      - caption: DNS Recods (Infomaniak)
+        type: toggle
         name: dns
-        markup: "Please add the correct CNAME configuration to point your domain to the current environment URL before clicking on Install."
+        default: true
+        required: false
+        tooltip: "Automatically add DNS records."
+        showIf:
+          true:
+          - caption: DNS Token
+            type: string
+            name: dnsToken
+            inputType: password
+            required: true
       - caption: Let's Encrypt
         type: toggle
         name: letsEncrypt
@@ -69,6 +79,7 @@ nodes:
   nodeType: ubuntu22
   nodeGroup: cp
   displayName: Application
+  extip: true
 
 skipNodeEmails: true
     
@@ -77,6 +88,7 @@ onInstall:
   - createEnvFile
   - installDocker
   - installWebhook
+  - if (${settings.dns}): addDNSRecords
   - if (${settings.nginx}): installNginx
   - if (${settings.letsEncrypt}): installLetsEncrypt
 
@@ -103,7 +115,7 @@ actions:
    cmd[${nodes.cp.master.id}]: |- 
       # Add Docker's official GPG key:
       sudo apt-get update
-      sudo apt-get install ca-certificates curl
+      sudo apt-get --assume-yes install ca-certificates curl
       sudo install -m 0755 -d /etc/apt/keyrings
       sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
       sudo chmod a+r /etc/apt/keyrings/docker.asc
@@ -113,21 +125,43 @@ actions:
         "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
         $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
         sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-      sudo apt-get update
+      sudo apt-get --assume-yes update
 
       # Install Docker
-      sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      sudo apt-get --assume-yes install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+      # Start Docker
+      sudo systemctl start docker
 
       # Run docker compose 
       sudo docker compose -f /home/jelastic/app/${settings.compose} up -d
+
+  addDNSRecords:
+    cmd[${nodes.cp.master.id}]: |-
+      LIST="${settings.domains}"
+      IFS=$'\n' read -r -d '' -a DOMAINS <<< "$(echo -e "$LIST")"
+      for DOMAIN in "${DOMAINS[@]}"; do
+          IFS=':' read -r -a DOMAIN <<< "$DOMAIN"
+          source=$(echo ${DOMAIN[0]} | cut -d'.' -f2-)
+          curl -X POST \
+            -H "Authorization: Bearer ${settings.dnsToken}" \
+            -H "Content-Type: application/json" \
+            -d '{
+                "target": "${nodes.cp.master.address}",
+                "ttl": "3600",
+                "type": "A",
+                "source": "'${source}'"
+            }' \
+            https://api.infomaniak.com/2/zones/1582834/records
+      done
   
   installWebhook:
    cmd[${nodes.cp.master.id}]: |-
       # Create a webhook on GitHub
-      curl -X POST -H "Authorization: Bearer ${settings.token}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/${settings.repo}/hooks -d '{"name": "web", "active": true, "events": ["push"], "config": {"url": "http://${env.domain}:9000/hooks/github", "content_type": "json"}}'
+      curl -X POST -H "Authorization: Bearer ${settings.token}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/${settings.repo}/hooks -d '{"name": "web", "active": true, "events": ["push"], "config": {"url": "http://${nodes.cp.master.address}:9000/hooks/github", "content_type": "json"}}'
 
       # Install webhook
-      sudo apt-get install webhook
+      sudo apt-get install --assume-yes webhook
 
       # Create a hooks.json file
       cat > /home/jelastic/hooks.json <<EOF
@@ -169,7 +203,7 @@ actions:
   installNginx:
    cmd[${nodes.cp.master.id}]: |-
       # Install nginx
-      sudo apt-get install nginx
+      sudo apt-get --assume-yes install nginx
 
       # Create a server block for each domain
       LIST="${settings.domains}"
@@ -207,7 +241,7 @@ actions:
   installLetsEncrypt:
    cmd[${nodes.cp.master.id}]: |-
       # Install Let's Encrypt
-      sudo apt install certbot python3-certbot-apache
+      sudo apt --assume-yes install certbot python3-certbot-apache
 
       # Get the list of domains from nginx in /etc/nginx/sites-enabled/ 
       LIST=$(ls -p /etc/nginx/sites-enabled/  | grep -v / | tr '\n' ',')
