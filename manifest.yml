@@ -82,7 +82,8 @@ onInstall:
 
 actions: 
   cloneRepo:
-    cmd: |
+    cmd: 
+      - |
       if [ -n "${settings.token}" ]; then
           git clone -b ${settings.branch} https://${settings.token}@github.com/${settings.repo}.git /home/jelastic/app
       else
@@ -90,13 +91,15 @@ actions:
       fi
 
   createEnvFile:
-    cmd: |
+    cmd: 
+      - |
       if [ -n "${settings.env}" ]; then
           echo "${settings.env}" > /home/jelastic/app/.env
       fi
 
   installDocker:
-    cmd: | 
+    cmd: 
+      - | 
       # Add Docker's official GPG key:
       sudo apt-get update
       sudo apt-get install ca-certificates curl
@@ -118,7 +121,8 @@ actions:
       sudo docker compose -f /home/jelastic/app/${settings.compose} up -d
   
   installWebhook:
-    cmd: |
+    cmd: 
+      - |
       # Create a webhook on GitHub
       curl -X POST -H "Authorization: Bearer ${settings.token}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/${settings.repo}/hooks -d '{"name": "web", "active": true, "events": ["push"], "config": {"url": "http://${env.domain}:9000/hooks/github", "content_type": "json"}}'
 
@@ -163,7 +167,8 @@ actions:
       sudo systemctl enable webhook
 
   installNginx:
-    cmd: |
+    cmd: 
+      - |
       # Install nginx
       sudo apt-get install nginx
 
@@ -201,7 +206,8 @@ actions:
       sudo systemctl enable nginx
 
   installLetsEncrypt:
-    cmd: |
+    cmd: 
+      - |
       # Install Let's Encrypt
       sudo apt install certbot python3-certbot-apache
 
