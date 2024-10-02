@@ -83,6 +83,10 @@ onInstall:
 actions: 
   cloneRepo:
    cmd[${nodes.cp.master.id}]: |-
+      # Install GitHub
+      sudo apt-get install git
+
+      # Clone the repository
       if [ -n "${settings.token}" ]; then
           git clone -b ${settings.branch} https://${settings.token}@github.com/${settings.repo}.git /home/jelastic/app
       else
