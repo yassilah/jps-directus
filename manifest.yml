@@ -80,6 +80,8 @@ nodes:
   nodeGroup: cp
   displayName: Application
   extip: true
+  env:
+    JELASTIC_PORTS: 80,443
 
 skipNodeEmails: true
     
@@ -136,7 +138,8 @@ actions:
       # If deploy script then run it
       if [ -f /home/jelastic/app/${settings.deploy} ]; then
           sudo chmod +x /home/jelastic/app/${settings.deploy}
-          bash /home/jelastic/app/${settings.deploy}
+          cd /home/jelastic/app
+          bash ${settings.deploy}
       fi
 
       # Run docker compose 
