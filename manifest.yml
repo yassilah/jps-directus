@@ -81,7 +81,7 @@ nodes:
   displayName: Application
   extip: true
   env:
-    JELASTIC_PORTS: 80,443,9000
+    JELASTIC_PORTS: 80, 443, 9000
 
 skipNodeEmails: true
     
@@ -96,7 +96,7 @@ onInstall:
 
 actions: 
   cloneRepo:
-   cmd[${nodes.cp.master.id}]: |-
+   cmd[cp]: |-
       # Install GitHub
       sudo apt-get --assume-yes install git
 
@@ -108,13 +108,15 @@ actions:
       fi
 
   createEnvFile:
-   cmd[${nodes.cp.master.id}]: |-
+   cmd[cp]: |-
       if [ -n "${settings.env}" ]; then
-          echo "${settings.env}" > /home/jelastic/app/.env
+          echo -e "\n${settings.env}" >> /.jelenv
       fi
 
+      ln -s /.jelenv /home/jelastic/app/.env
+
   installDocker:
-   cmd[${nodes.cp.master.id}]: |- 
+   cmd[cp]: |- 
       # Add Docker's official GPG key:
       sudo apt-get update
       sudo apt-get --assume-yes install ca-certificates curl
@@ -146,7 +148,7 @@ actions:
       sudo docker compose -f /home/jelastic/app/${settings.compose} up -d
 
   addDNSRecords:
-    cmd[${nodes.cp.master.id}]: |-
+    cmd[cp]: |-
       LIST="${settings.domains}"
       
       IFS=$'\n' read -r -d '' -a DOMAINS <<< "$(echo "$LIST")"
@@ -168,9 +170,9 @@ actions:
       done
   
   installWebhook:
-   cmd[${nodes.cp.master.id}]: |-
+   cmd[cp]: |-
       # Create a webhook on GitHub
-      curl -X POST -H "Authorization: Bearer ${settings.token}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/${settings.repo}/hooks -d '{"name": "web", "active": true, "events": ["push"], "config": {"url": "http://${nodes.cp.master.extips[0]}:9000/hooks/github", "content_type": "json"}}'
+      curl -X POST -H "Authorization: Bearer ${settings.token}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/${settings.repo}/hooks -d '{"name": "web", "active": true, "events": ["push"], "config": {"url": "http://${env.domain}:9000/hooks/github", "content_type": "json"}}'
 
       # Install webhook
       sudo apt-get install --assume-yes webhook
@@ -222,7 +224,7 @@ actions:
       sudo systemctl enable webhook
 
   installNginx:
-   cmd[${nodes.cp.master.id}]: |-
+   cmd[cp]: |-
       # Install nginx
       sudo apt-get --assume-yes install nginx
 
@@ -237,6 +239,7 @@ actions:
           cat > /etc/nginx/sites-available/${DOMAIN[0]}.conf <<EOF
       server {
           listen 80;
+          listen [::]:80;
           server_name ${DOMAIN[0]};
 
           location / {
@@ -246,6 +249,11 @@ actions:
               proxy_set_header Connection 'upgrade';
               proxy_set_header Host \$host;
               proxy_cache_bypass \$http_upgrade;
+          }
+
+          location ^~ /.well-known/acme-challenge/ {
+              default_type "text/plain";
+              root /var/www/html;
           }
       }
       EOF
@@ -258,17 +266,21 @@ actions:
 
       # Enable nginx
       sudo systemctl enable nginx
+      
 
   installLetsEncrypt:
-   cmd[${nodes.cp.master.id}]: |-
+   cmd[cp]: |-
       # Install Let's Encrypt
       sudo apt --assume-yes install certbot python3-certbot-nginx
 
+      # Restart nginx
+      sudo systemctl restart nginx
+
       # Get the list of domains from nginx in /etc/nginx/sites-enabled/ 
-      LIST=$(ls -p /etc/nginx/sites-enabled/*.conf | xargs -n 1 basename | tr '\n' ',' | sed 's/\.conf//g' | sed 's/,$//g') \
+      LIST=$(ls -p /etc/nginx/sites-enabled/*.conf | xargs -n 1 basename | tr '\n' ',' | sed 's/\.conf//g' | sed 's/,$//g')
 
       # Install SSL certificates for each domain
-      sudo certbot --nginx -d $LIST -n --agree-tos -m ${settings.letsEncryptEmail} --redirect
+      sudo certbot --nginx -d $LIST -w /var/www/html -n --agree-tos -m ${settings.letsEncryptEmail} --redirect
 
       # Restart nginx
       sudo systemctl restart nginx
