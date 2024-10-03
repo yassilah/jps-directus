@@ -284,3 +284,6 @@ actions:
 
       # Install SSL certificates for each domain
       sudo certbot --nginx -d $LIST -w /var/www/html -n --agree-tos -m ${settings.letsEncryptEmail} --redirect
+
+      # Restart nginx
+      sudo systemctl restart nginx
