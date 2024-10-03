@@ -81,7 +81,7 @@ nodes:
   displayName: Application
   extip: true
   env:
-    JELASTIC_PORTS: 80, 443, 9000
+    JELASTIC_PORTS: 80,443,9000
 
 skipNodeEmails: true
     
@@ -187,11 +187,12 @@ actions:
           "response-message": "Redeploying...",
           "trigger-rule": {
             "match": { 
-            "value": "refs/heads/${settings.branch}", 
-            "type": "value", 
-            "parameter": {
-              "source": "payload",
-              "name": "ref"
+              "value": "refs/heads/${settings.branch}", 
+              "type": "value", 
+              "parameter": {
+                "source": "payload",
+                "name": "ref"
+              }
             }
           }
         }
@@ -273,14 +274,8 @@ actions:
       # Install Let's Encrypt
       sudo apt --assume-yes install certbot python3-certbot-nginx
 
-      # Restart nginx
-      sudo systemctl restart nginx
-
       # Get the list of domains from nginx in /etc/nginx/sites-enabled/ 
       LIST=$(ls -p /etc/nginx/sites-enabled/*.conf | xargs -n 1 basename | tr '\n' ',' | sed 's/\.conf//g' | sed 's/,$//g')
 
       # Install SSL certificates for each domain
       sudo certbot --nginx -d $LIST -w /var/www/html -n --agree-tos -m ${settings.letsEncryptEmail} --redirect
-
-      # Restart nginx
-      sudo systemctl restart nginx
