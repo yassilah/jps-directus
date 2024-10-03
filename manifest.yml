@@ -2,89 +2,89 @@ type: install
 name: Docker Compose from GitHub
 tooltip: Install Docker Compose from GitHub repository.
 
-settings: 
-  fields:  
-  - caption: GitHub Repository
-    type: string
-    name: repo
-    placeholder: username/repo
-    required: true
-    regex: ^[a-zA-Z0-9-]+/[a-zA-Z0-9-]+$
-  - caption: GitHub Branch
-    type: string
-    name: branch
-    default: main
-  - caption: Access Token
-    type: string
-    name: token
-    inputType: password
-  - type: spacer
-  - caption: Docker Compose
-    type: string
-    name: compose
-    default: docker-compose.yaml
-    required: true
-  - caption: Deploy script
-    type: string
-    name: deploy
-    default: deploy.sh
-    required: true
-  - caption: Environment Variables
-    type: text
-    name: env
-    required: false
-  - type: spacer
-  - caption: NGINX
-    type: toggle
-    name: nginx
-    default: true
-    required: false
-    tooltip: "Automatically generate NGINX configuration."
-    showIf: 
-      true:
-      - caption: NGINX Mapping
-        type: text
-        name: domains
-        tooltip: "Port <-> Domain mapping: 'domain:port'."
-      - caption: DNS Recods (Infomaniak)
-        type: toggle
-        name: dns
-        default: true
-        required: false
-        tooltip: "Automatically add DNS records."
-        showIf:
-          true:
-          - caption: DNS Token
-            type: string
-            name: dnsToken
-            inputType: password
-            required: true
-      - caption: Let's Encrypt
-        type: toggle
-        name: letsEncrypt
-        tooltip: "Automatically generate SSL certificates."
-        default: true
-        showIf:
-          true:
-          - caption: Email
-            type: string
-            name: letsEncryptEmail
-            tooltip: "Email for Let's Encrypt notifications."
-            default: contact@apenhet.com
+settings:
+  fields:
+    - caption: GitHub Repository
+      type: string
+      name: repo
+      placeholder: username/repo
+      required: true
+      regex: ^[a-zA-Z0-9-]+/[a-zA-Z0-9-]+$
+    - caption: GitHub Branch
+      type: string
+      name: branch
+      default: main
+    - caption: Access Token
+      type: string
+      name: token
+      inputType: password
+    - type: spacer
+    - caption: Docker Compose
+      type: string
+      name: compose
+      default: docker-compose.yaml
+      required: true
+    - caption: Deploy script
+      type: string
+      name: deploy
+      default: deploy.sh
+      required: true
+    - caption: Environment Variables
+      type: text
+      name: env
+      required: false
+    - type: spacer
+    - caption: NGINX
+      type: toggle
+      name: nginx
+      default: true
+      required: false
+      tooltip: "Automatically generate NGINX configuration."
+      showIf:
+        true:
+          - caption: NGINX Mapping
+            type: text
+            name: domains
+            tooltip: "Port <-> Domain mapping: 'domain:port'."
+          - caption: DNS Recods (Infomaniak)
+            type: toggle
+            name: dns
+            default: true
             required: false
-  
+            tooltip: "Automatically add DNS records."
+            showIf:
+              true:
+                - caption: DNS Token
+                  type: string
+                  name: dnsToken
+                  inputType: password
+                  required: true
+          - caption: Let's Encrypt
+            type: toggle
+            name: letsEncrypt
+            tooltip: "Automatically generate SSL certificates."
+            default: true
+            showIf:
+              true:
+                - caption: Email
+                  type: string
+                  name: letsEncryptEmail
+                  tooltip: "Email for Let's Encrypt notifications."
+                  default: contact@apenhet.com
+                  required: false
+
 nodes:
-- count: 1
-  cloudlets: 32
-  nodeType: ubuntu22
-  nodeGroup: cp
-  displayName: Application
-  extip: true
-  env:
-    JELASTIC_PORTS: 80,443,9000
+  - count: 1
+    cloudlets: 32
+    nodeType: ubuntu22
+    nodeGroup: cp
+    displayName: Application
+    extip: true
+    env:
+      JELASTIC_PORTS: 80,443,9000
 
 skipNodeEmails: true
-    
+
 onInstall:
   - if (${settings.dns}): addDNSRecords
   - cloneRepo
@@ -94,9 +94,9 @@ onInstall:
   - if (${settings.nginx}): installNginx
   - if (${settings.letsEncrypt}): installLetsEncrypt
 
-actions: 
+actions:
   cloneRepo:
-   cmd[cp]: |-
+    cmd[cp]: |-
       # Install GitHub
       sudo apt-get --assume-yes install git
 
@@ -108,7 +108,7 @@ actions:
       fi
 
   createEnvFile:
-   cmd[cp]: |-
+    cmd[cp]: |-
       if [ -n "${settings.env}" ]; then
           echo -e "\n${settings.env}" >> /.jelenv
       fi
@@ -116,7 +116,7 @@ actions:
       ln -s /.jelenv /home/jelastic/app/.env
 
   installDocker:
-   cmd[cp]: |- 
+    cmd[cp]: |-
       # Add Docker's official GPG key:
       sudo apt-get update
       sudo apt-get --assume-yes install ca-certificates curl
@@ -150,7 +150,7 @@ actions:
   addDNSRecords:
     cmd[cp]: |-
       LIST="${settings.domains}"
-      
+
       IFS=$'\n' read -r -d '' -a DOMAINS <<< "$(echo "$LIST")"
 
       for DOMAIN in "${DOMAINS[@]}"; do
@@ -168,9 +168,9 @@ actions:
           }' \
           https://api.infomaniak.com/2/zones/$MAIN/records
       done
-  
+
   installWebhook:
-   cmd[cp]: |-
+    cmd[cp]: |-
       # Create a webhook on GitHub
       curl -X POST -H "Authorization: Bearer ${settings.token}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/${settings.repo}/hooks -d '{"name": "web", "active": true, "events": ["push"], "config": {"url": "http://${env.domain}:9000/hooks/github", "content_type": "json"}}'
 
@@ -225,7 +225,7 @@ actions:
       sudo systemctl enable webhook
 
   installNginx:
-   cmd[cp]: |-
+    cmd[cp]: |-
       # Install nginx
       sudo apt-get --assume-yes install nginx
 
@@ -267,10 +267,15 @@ actions:
 
       # Enable nginx
       sudo systemctl enable nginx
-      
 
   installLetsEncrypt:
-   cmd[cp]: |-
+    restartNodes:
+      - nodeType: cp
+        reboot: true
+    cmd[cp]: |-
+      # Ensure nginx is running
+      sudo systemctl start nginx
+
       # Install Let's Encrypt
       sudo apt --assume-yes install certbot python3-certbot-nginx
 
